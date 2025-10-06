@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# Tests and docs (exclude from image)
+*.md
+README*.md
+README*.txt
+tests/
+*test*.py
+
+# Runtime artifacts
+uploads/
+output/
+
+# Git
+.git
+.gitignore

@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+easyocr
+opencv-python-headless
+pillow
+numpy
+python-multipart
+pytest
+httpx
+requests
+python-dotenv

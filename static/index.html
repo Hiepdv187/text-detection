@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OCR Text Recognition</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .card {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            margin-bottom: 20px;
+        }
+
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 15px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: #f8f9ff;
+        }
+
+        .upload-area:hover {
+            border-color: #764ba2;
+            background: #f0f1ff;
+        }
+
+        .upload-area.dragover {
+            border-color: #764ba2;
+            background: #e8e9ff;
+            transform: scale(1.02);
+        }
+
+        .upload-icon {
+            font-size: 4em;
+            margin-bottom: 20px;
+        }
+
+        .upload-text {
+            font-size: 1.2em;
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .upload-subtext {
+            color: #999;
+            font-size: 0.9em;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .camera-section {
+            margin-top: 20px;
+            text-align: center;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            border-radius: 30px;
+            font-size: 1.1em;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin: 10px;
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.6);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .preview-section {
+            margin-top: 30px;
+            display: none;
+        }
+
+        .preview-section.active {
+            display: block;
+        }
+
+        .preview-image {
+            max-width: 100%;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        .result-section {
+            margin-top: 30px;
+            display: none;
+        }
+
+        .result-section.active {
+            display: block;
+        }
+
+        .result-box {
+            background: #f8f9ff;
+            border: 2px solid #667eea;
+            border-radius: 10px;
+            padding: 20px;
+            min-height: 150px;
+            white-space: pre-wrap;
+            font-family: 'Courier New', monospace;
+            font-size: 1.1em;
+            line-height: 1.6;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            display: none;
+        }
+
+        .loading.active {
+            display: block;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .video-container {
+            position: relative;
+            margin: 20px 0;
+            display: none;
+        }
+
+        .video-container.active {
+            display: block;
+        }
+
+        video {
+            width: 100%;
+            max-width: 640px;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        canvas {
+            display: none;
+        }
+
+        .copy-btn {
+            background: #28a745;
+            margin-top: 10px;
+        }
+
+        .copy-btn:hover {
+            background: #218838;
+        }
+
+        .alert {
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .alert.active {
+            display: block;
+        }
+
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📷 OCR Text Recognition</h1>
+            <p>Nhận diện văn bản từ ảnh - Hỗ trợ Tiếng Việt & Tiếng Anh</p>
+        </div>
+
+        <div class="card">
+            <div id="alert" class="alert"></div>
+
+            <!-- Upload Area -->
+            <div class="upload-area" id="uploadArea">
+                <div class="upload-icon">📁</div>
+                <div class="upload-text">Kéo thả ảnh vào đây hoặc click để chọn</div>
+                <div class="upload-subtext">Hỗ trợ: JPG, PNG, JPEG</div>
+                <input type="file" id="fileInput" accept="image/*">
+            </div>
+
+            <!-- Camera Section -->
+            <div class="camera-section">
+                <button class="btn" id="cameraBtn">📸 Chụp ảnh từ Camera</button>
+            </div>
+
+            <!-- Video Container -->
+            <div class="video-container" id="videoContainer">
+                <video id="video" autoplay playsinline></video>
+                <canvas id="canvas"></canvas>
+                <div style="text-align: center; margin-top: 10px;">
+                    <button class="btn" id="captureBtn">📸 Chụp</button>
+                    <button class="btn" id="closeCameraBtn" style="background: #dc3545;">❌ Đóng Camera</button>
+                </div>
+            </div>
+
+            <!-- Loading -->
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>Đang nhận diện văn bản...</p>
+            </div>
+
+            <!-- Preview Section -->
+            <div class="preview-section" id="previewSection">
+                <h3>Ảnh đã chọn:</h3>
+                <img id="previewImage" class="preview-image" alt="Preview">
+            </div>
+
+            <!-- Result Section -->
+            <div class="result-section" id="resultSection">
+                <h3>Văn bản nhận diện được:</h3>
+                <div class="result-box" id="resultBox"></div>
+                <button class="btn copy-btn" id="copyBtn">📋 Copy văn bản</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const previewSection = document.getElementById('previewSection');
+        const previewImage = document.getElementById('previewImage');
+        const resultSection = document.getElementById('resultSection');
+        const resultBox = document.getElementById('resultBox');
+        const loading = document.getElementById('loading');
+        const alert = document.getElementById('alert');
+        const copyBtn = document.getElementById('copyBtn');
+        const cameraBtn = document.getElementById('cameraBtn');
+        const videoContainer = document.getElementById('videoContainer');
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const captureBtn = document.getElementById('captureBtn');
+        const closeCameraBtn = document.getElementById('closeCameraBtn');
+
+        let stream = null;
+
+        // Upload area click
+        uploadArea.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        // File input change
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                handleFile(file);
+            }
+        });
+
+        // Drag and drop
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            if (file && file.type.startsWith('image/')) {
+                handleFile(file);
+            } else {
+                showAlert('Vui lòng chọn file ảnh!', 'error');
+            }
+        });
+
+        // Camera button
+        cameraBtn.addEventListener('click', async () => {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment' } 
+                });
+                video.srcObject = stream;
+                videoContainer.classList.add('active');
+                cameraBtn.style.display = 'none';
+            } catch (err) {
+                showAlert('Không thể truy cập camera: ' + err.message, 'error');
+            }
+        });
+
+        // Capture button
+        captureBtn.addEventListener('click', () => {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0);
+            
+            canvas.toBlob((blob) => {
+                const file = new File([blob], 'camera-capture.jpg', { type: 'image/jpeg' });
+                handleFile(file);
+                closeCamera();
+            }, 'image/jpeg');
+        });
+
+        // Close camera button
+        closeCameraBtn.addEventListener('click', closeCamera);
+
+        function closeCamera() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+            videoContainer.classList.remove('active');
+            cameraBtn.style.display = 'inline-block';
+        }
+
+        // Handle file
+        async function handleFile(file) {
+            // Show preview
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                previewImage.src = e.target.result;
+                previewSection.classList.add('active');
+            };
+            reader.readAsDataURL(file);
+
+            // Upload to API
+            await uploadToAPI(file);
+        }
+
+        // Upload to API
+        async function uploadToAPI(file) {
+            loading.classList.add('active');
+            resultSection.classList.remove('active');
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/ocr/recognize', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.status === 'success') {
+                    resultBox.textContent = data.text || 'Không nhận diện được văn bản nào';
+                    resultSection.classList.add('active');
+                    showAlert('✅ Nhận diện thành công!', 'success');
+                } else {
+                    showAlert('❌ Lỗi: ' + (data.detail || 'Không thể nhận diện'), 'error');
+                }
+            } catch (error) {
+                showAlert('❌ Lỗi kết nối: ' + error.message, 'error');
+            } finally {
+                loading.classList.remove('active');
+            }
+        }
+
+        // Copy button
+        copyBtn.addEventListener('click', () => {
+            const text = resultBox.textContent;
+            navigator.clipboard.writeText(text).then(() => {
+                showAlert('✅ Đã copy văn bản!', 'success');
+            });
+        });
+
+        // Show alert
+        function showAlert(message, type) {
+            alert.textContent = message;
+            alert.className = `alert alert-${type} active`;
+            setTimeout(() => {
+                alert.classList.remove('active');
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
