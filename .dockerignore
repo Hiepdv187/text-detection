@@ -14,7 +14,6 @@ venv/
 # Tests and docs (exclude from image)
 *.md
 README*.md
-README*.txt
 tests/
 *test*.py
 

@@ -1,34 +1,30 @@
-# Lightweight Python base image
+# Sử dụng base image nhẹ
 FROM python:3.11-slim
 
-# Avoid interactive prompts and enable UTF-8
+# Thiết lập môi trường
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PORT=5678 \
-    HOST=0.0.0.0
+    DEBIAN_FRONTEND=noninteractive
 
-# Install OS packages required by EasyOCR/OpenCV
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libgl1 \
-    libglib2.0-0 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create app directory
 WORKDIR /app
 
-COPY requirements.txt ./
+# Cài các gói hệ thống cần thiết (cho OpenCV và EasyOCR)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential libglib2.0-0 libsm6 libxrender1 libxext6 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --upgrade pip && pip install -r requirements.txt
+# Copy file dependency
+COPY requirements.txt .
 
+# Cài torch stack bản CPU (nhẹ, tương thích mọi hệ điều hành)
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir -r requirements.txt
 
-COPY main.py ./
-
-COPY static/ ./static/
-
-RUN mkdir -p uploads output
+# Copy toàn bộ source
+COPY . .
 
 EXPOSE 5678
 
-CMD ["sh", "-c", "uvicorn main:app --host $HOST --port ${PORT:-5678}"]
+# Chạy ứng dụng bằng Uvicorn
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "5678"]
