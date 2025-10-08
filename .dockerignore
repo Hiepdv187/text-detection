@@ -5,22 +5,33 @@ __pycache__/
 *.pyd
 .venv/
 venv/
-.env
+env/
 
 # IDE
 .vscode/
 .idea/
+*.swp
+*.swo
 
-# Tests and docs (exclude from image)
-*.md
-README*.md
+# Tests and docs
 tests/
 *test*.py
+pytest.ini
 
-# Runtime artifacts
-uploads/
-output/
+# Runtime artifacts (sẽ tạo mới trong container)
+uploads/*
+output/*
+!uploads/.gitkeep
+!output/.gitkeep
 
 # Git
 .git
 .gitignore
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Logs
+*.log

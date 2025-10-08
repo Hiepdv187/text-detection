@@ -155,6 +155,83 @@
             font-family: 'Courier New', monospace;
             font-size: 1.1em;
             line-height: 1.6;
+            margin-bottom: 20px;
+        }
+
+        .result-box.corrected {
+            background: #d4edda;
+            border-color: #28a745;
+        }
+
+        .result-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+
+        .result-title {
+            font-weight: bold;
+            color: #667eea;
+            font-size: 1.1em;
+        }
+
+        .result-title.corrected {
+            color: #28a745;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: bold;
+        }
+
+        .badge-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .badge-info {
+            background: #17a2b8;
+            color: white;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        .tab {
+            padding: 12px 24px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            font-size: 1em;
+            color: #666;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s;
+        }
+
+        .tab:hover {
+            color: #667eea;
+        }
+
+        .tab.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+            font-weight: bold;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
         }
 
         .loading {
@@ -239,8 +316,8 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>📷 OCR Text Recognition</h1>
-            <p>Nhận diện văn bản từ ảnh - Hỗ trợ Tiếng Việt & Tiếng Anh</p>
+            <h1>📷 OCR Text Recognition + AI</h1>
+            <p>Nhận diện văn bản từ ảnh với tự động sửa lỗi bằng AI - Hỗ trợ Tiếng Việt & Tiếng Anh</p>
         </div>
 
         <div class="card">
@@ -283,9 +360,27 @@
 
             <!-- Result Section -->
             <div class="result-section" id="resultSection">
-                <h3>Văn bản nhận diện được:</h3>
-                <div class="result-box" id="resultBox"></div>
-                <button class="btn copy-btn" id="copyBtn">📋 Copy văn bản</button>
+                <div class="tabs" id="tabs" style="display: none;">
+                    <button class="tab active" data-tab="original">📝 Văn bản gốc</button>
+                    <button class="tab" data-tab="corrected">✨ Đã sửa lỗi (AI)</button>
+                </div>
+
+                <div class="tab-content active" id="originalTab">
+                    <div class="result-header">
+                        <span class="result-title">📝 Văn bản nhận diện từ OCR:</span>
+                    </div>
+                    <div class="result-box" id="resultBox"></div>
+                    <button class="btn copy-btn" id="copyBtn">📋 Copy văn bản gốc</button>
+                </div>
+
+                <div class="tab-content" id="correctedTab">
+                    <div class="result-header">
+                        <span class="result-title corrected">✨ Văn bản đã sửa lỗi bằng AI:</span>
+                        <span class="badge badge-success" id="llmBadge">AI Corrected</span>
+                    </div>
+                    <div class="result-box corrected" id="correctedBox"></div>
+                    <button class="btn copy-btn" id="copyCorrectedBtn">📋 Copy văn bản đã sửa</button>
+                </div>
             </div>
         </div>
     </div>
@@ -297,9 +392,15 @@
         const previewImage = document.getElementById('previewImage');
         const resultSection = document.getElementById('resultSection');
         const resultBox = document.getElementById('resultBox');
+        const correctedBox = document.getElementById('correctedBox');
         const loading = document.getElementById('loading');
         const alert = document.getElementById('alert');
         const copyBtn = document.getElementById('copyBtn');
+        const copyCorrectedBtn = document.getElementById('copyCorrectedBtn');
+        const tabs = document.getElementById('tabs');
+        const tabButtons = document.querySelectorAll('.tab');
+        const originalTab = document.getElementById('originalTab');
+        const correctedTab = document.getElementById('correctedTab');
         const cameraBtn = document.getElementById('cameraBtn');
         const videoContainer = document.getElementById('videoContainer');
         const video = document.getElementById('video');
@@ -413,9 +514,25 @@
                 const data = await response.json();
 
                 if (response.ok && data.status === 'success') {
+                    // Hiển thị văn bản gốc
                     resultBox.textContent = data.text || 'Không nhận diện được văn bản nào';
+                    
+                    // Kiểm tra và hiển thị văn bản đã sửa
+                    if (data.llm_correction && data.llm_correction.corrected && data.llm_correction.corrected_text) {
+                        correctedBox.textContent = data.llm_correction.corrected_text;
+                        tabs.style.display = 'flex';
+                        
+                        // Cập nhật badge với provider
+                        const provider = data.llm_correction.provider || 'AI';
+                        document.getElementById('llmBadge').textContent = `${provider.toUpperCase()} Corrected`;
+                        
+                        showAlert('✅ Nhận diện thành công! AI đã tự động sửa lỗi.', 'success');
+                    } else {
+                        tabs.style.display = 'none';
+                        showAlert('✅ Nhận diện thành công!', 'success');
+                    }
+                    
                     resultSection.classList.add('active');
-                    showAlert('✅ Nhận diện thành công!', 'success');
                 } else {
                     showAlert('❌ Lỗi: ' + (data.detail || 'Không thể nhận diện'), 'error');
                 }
@@ -426,11 +543,38 @@
             }
         }
 
-        // Copy button
+        // Tab switching
+        tabButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                const tabName = button.dataset.tab;
+                
+                // Update active tab button
+                tabButtons.forEach(btn => btn.classList.remove('active'));
+                button.classList.add('active');
+                
+                // Update active tab content
+                if (tabName === 'original') {
+                    originalTab.classList.add('active');
+                    correctedTab.classList.remove('active');
+                } else {
+                    originalTab.classList.remove('active');
+                    correctedTab.classList.add('active');
+                }
+            });
+        });
+
+        // Copy buttons
         copyBtn.addEventListener('click', () => {
             const text = resultBox.textContent;
             navigator.clipboard.writeText(text).then(() => {
-                showAlert('✅ Đã copy văn bản!', 'success');
+                showAlert('✅ Đã copy văn bản gốc!', 'success');
+            });
+        });
+
+        copyCorrectedBtn.addEventListener('click', () => {
+            const text = correctedBox.textContent;
+            navigator.clipboard.writeText(text).then(() => {
+                showAlert('✅ Đã copy văn bản đã sửa!', 'success');
             });
         });
 
