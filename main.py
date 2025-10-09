@@ -80,40 +80,45 @@ force_cpu = os.getenv("FORCE_CPU", "").lower() == "true"
 force_gpu = os.getenv("FORCE_GPU", "").lower() == "true"
 use_gpu_auto = os.getenv("USE_GPU_AUTO", "true").lower() == "true"
 
+# Mặc định hỗ trợ tiếng Việt + tiếng Anh
+OCR_LANG_RAW = os.getenv("OCR_LANG", "vi,en").strip() or "vi,en"
+OCR_LANGS = [lang.strip() for lang in OCR_LANG_RAW.split(",") if lang.strip()]
+
+# 🔥 Dùng model đa ngôn ngữ (multilingual) để nhận diện được cả tiếng Việt và tiếng Anh
+PRIMARY_OCR_LANG = "multilingual"
+
+# --- Tự động phát hiện GPU ---
 USE_GPU = False
 reason = "auto"
 
-if force_cpu:
-    USE_GPU = False
-    reason = "forced_cpu"
-elif force_gpu:
-    try:
-        has_cuda = hasattr(torch, "cuda") and torch.cuda.is_available()
-        has_mps = hasattr(torch, "backends") and hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+try:
+    if force_cpu:
+        USE_GPU = False
+        reason = "forced_cpu"
+    elif force_gpu:
+        has_cuda = torch.cuda.is_available()
+        has_mps = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
         USE_GPU = bool(has_cuda or has_mps)
         reason = "forced_gpu_available" if USE_GPU else "forced_gpu_unavailable_fallback_cpu"
-    except Exception:
-        USE_GPU = False
-        reason = "forced_gpu_error_fallback_cpu"
-elif use_gpu_auto:
-    try:
-        has_cuda = hasattr(torch, "cuda") and torch.cuda.is_available()
-        has_mps = hasattr(torch, "backends") and hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+    elif use_gpu_auto:
+        has_cuda = torch.cuda.is_available()
+        has_mps = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
         USE_GPU = bool(has_cuda or has_mps)
         reason = "auto_gpu" if USE_GPU else "auto_cpu"
-    except Exception:
-        USE_GPU = False
-        reason = "auto_error_cpu"
-else:
+except Exception:
     USE_GPU = False
-    reason = "env_disabled_cpu"
+    reason = "auto_error_cpu"
 
 print(f"[PaddleOCR] Device: {'GPU' if USE_GPU else 'CPU'} (mode={reason})")
+print(f"[PaddleOCR] Language(s): {', '.join(OCR_LANGS)} → Model: {PRIMARY_OCR_LANG}")
 
+# --- Khởi tạo PaddleOCR ---
 ocr = PaddleOCR(
-    use_angle_cls=True,
-    lang='en',  # PaddleOCR không có sẵn model 'vi', nhưng tiếng Việt đọc được khá tốt
-    use_gpu=USE_GPU
+    use_angle_cls=True,         # Xoay góc chữ tự động
+    lang=PRIMARY_OCR_LANG,      # 🔥 Model đa ngôn ngữ (nhận cả TV + EN)
+    use_gpu=USE_GPU,            # GPU/CPU tự chọn
+    rec_model_dir=None,         # Dùng model mặc định
+    det_model_dir=None
 )
 
 # ==========================

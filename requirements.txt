@@ -1,19 +1,20 @@
-fastapi==0.118.0
-uvicorn[standard]==0.37.0
+# --- Web framework ---
+fastapi==0.115.5
+uvicorn[standard]==0.32.0
 python-multipart==0.0.20
-python-dotenv==1.1.1
+python-dotenv==1.0.1
 
-# OCR
-paddleocr==2.9.1
-paddlepaddle==2.6.1    # CPU build (GPU version: paddlepaddle-gpu==2.6.1)
+# --- OCR (PP-OCRv4 multilingual) ---
+paddleocr==3.1.1
+paddlepaddle==3.0.0  # CPU build (GPU: paddlepaddle-gpu==3.0.0.post120)
 
-opencv-python-headless==4.9.0.80
+opencv-python-headless==4.10.0.84
 pillow==10.4.0
-numpy>=1.21.0,<1.27.0
+numpy>=1.21.0,<2.0.0
 
-# LLM + HTTP
-requests==2.32.3
+# --- Network / async ---
 httpx==0.28.1
+requests==2.32.3
 
-# Test
-pytest==8.4.2
+# --- Testing ---
+pytest==8.3.3

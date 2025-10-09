@@ -11,7 +11,7 @@ WORKDIR /app
 
 # Cài các gói hệ thống cần thiết
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential libglib2.0-0 libsm6 libxrender1 libxext6 git wget \
+    build-essential libglib2.0-0 libsm6 libxrender1 libxext6 libgl1 git wget \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -40,7 +40,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libglib2.0-0 libsm6 libxrender1 libxext6 git wget \
+    libglib2.0-0 libsm6 libxrender1 libxext6 libgl1 libgomp1 git wget \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
