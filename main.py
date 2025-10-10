@@ -1,275 +1,185 @@
-from paddleocr import PaddleOCR
 import os
+import io
+import re
+import uuid
 import asyncio
+import time
 from typing import Optional, Dict
-from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
-from fastapi.openapi.docs import get_swagger_ui_html
-from fastapi.staticfiles import StaticFiles
-import torch
+from fastapi import FastAPI, File, UploadFile, BackgroundTasks, HTTPException
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.middleware.cors import CORSMiddleware
+from paddleocr import PaddleOCR
+from vietocr.tool.predictor import Predictor
+from vietocr.tool.config import Cfg
+from PIL import Image
 import httpx
-from dotenv import load_dotenv
-from datetime import datetime
 
+# ===========================================
+# ⚙️ Config & Init
+# ===========================================
 UPLOAD_DIR = "uploads"
 OUTPUT_DIR = "output"
-STATIC_DIR = "static"
-
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-os.makedirs(STATIC_DIR, exist_ok=True)
 
-tags_metadata = [
-    {"name": "OCR", "description": "Các API nhận diện văn bản (upload ảnh, health check)."},
-    {"name": "Web", "description": "Trang web giao diện test (HTML)."},
-]
-
-app = FastAPI(
-    title="OCR Text Recognition API with LLM Correction (PaddleOCR)",
-    description="Nhận diện văn bản từ ảnh (Python + PaddleOCR) với tính năng tự động sửa lỗi bằng LLM",
-    version="3.0.0",
-    openapi_tags=tags_metadata,
-    docs_url="/ocr/docs",
-    redoc_url="/ocr/redoc",
-)
-
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-load_dotenv()
-
-CLEANUP_AFTER_SECONDS = int(os.getenv("CLEANUP_AFTER_SECONDS", "600"))
-
-
-async def delete_file_after(path: str, delay_seconds: int = CLEANUP_AFTER_SECONDS) -> None:
-    try:
-        await asyncio.sleep(max(1, int(delay_seconds)))
-        if os.path.exists(path):
-            os.remove(path)
-    except Exception:
-        pass
-
-
-def cleanup_expired_in_dir(dir_path: str, ttl_seconds: int = CLEANUP_AFTER_SECONDS) -> int:
-    removed = 0
-    try:
-        if not os.path.isdir(dir_path):
-            return 0
-        now = datetime.now().timestamp()
-        for name in os.listdir(dir_path):
-            path = os.path.join(dir_path, name)
-            if os.path.isfile(path) and (now - os.path.getmtime(path)) > ttl_seconds:
-                try:
-                    os.remove(path)
-                    removed += 1
-                except Exception:
-                    pass
-    except Exception:
-        pass
-    return removed
-
-
-@app.on_event("startup")
-async def startup_cleanup():
-    cleanup_expired_in_dir(UPLOAD_DIR, CLEANUP_AFTER_SECONDS)
-    cleanup_expired_in_dir(OUTPUT_DIR, CLEANUP_AFTER_SECONDS)
-
-
-# ============================================
-# 🔧 PaddleOCR setup (auto CPU / GPU detection)
-# ============================================
-force_cpu = os.getenv("FORCE_CPU", "").lower() == "true"
-force_gpu = os.getenv("FORCE_GPU", "").lower() == "true"
-use_gpu_auto = os.getenv("USE_GPU_AUTO", "true").lower() == "true"
-
-# Mặc định hỗ trợ tiếng Việt + tiếng Anh
-OCR_LANG_RAW = os.getenv("OCR_LANG", "vi,en").strip() or "vi,en"
-OCR_LANGS = [lang.strip() for lang in OCR_LANG_RAW.split(",") if lang.strip()]
-
-# 🔥 Dùng model đa ngôn ngữ (multilingual) để nhận diện được cả tiếng Việt và tiếng Anh
-PRIMARY_OCR_LANG = "multilingual"
-
-# --- Tự động phát hiện GPU ---
-USE_GPU = False
-reason = "auto"
-
-try:
-    if force_cpu:
-        USE_GPU = False
-        reason = "forced_cpu"
-    elif force_gpu:
-        has_cuda = torch.cuda.is_available()
-        has_mps = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
-        USE_GPU = bool(has_cuda or has_mps)
-        reason = "forced_gpu_available" if USE_GPU else "forced_gpu_unavailable_fallback_cpu"
-    elif use_gpu_auto:
-        has_cuda = torch.cuda.is_available()
-        has_mps = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
-        USE_GPU = bool(has_cuda or has_mps)
-        reason = "auto_gpu" if USE_GPU else "auto_cpu"
-except Exception:
-    USE_GPU = False
-    reason = "auto_error_cpu"
-
-print(f"[PaddleOCR] Device: {'GPU' if USE_GPU else 'CPU'} (mode={reason})")
-print(f"[PaddleOCR] Language(s): {', '.join(OCR_LANGS)} → Model: {PRIMARY_OCR_LANG}")
-
-# --- Khởi tạo PaddleOCR ---
-ocr = PaddleOCR(
-    use_angle_cls=True,         # Xoay góc chữ tự động
-    lang=PRIMARY_OCR_LANG,      # 🔥 Model đa ngôn ngữ (nhận cả TV + EN)
-    use_gpu=USE_GPU,            # GPU/CPU tự chọn
-    rec_model_dir=None,         # Dùng model mặc định
-    det_model_dir=None
-)
-
-# ==========================
-# ⚙️ LLM correction settings
-# ==========================
-LLM_ENABLED = os.getenv("LLM_CORRECTION_ENABLED", "true").lower() == "true"
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").lower()
-LLM_MODEL = os.getenv("LLM_MODEL", "")
+USE_GPU = os.getenv("USE_GPU_AUTO", "true").lower() == "true"
+LLM_CORRECTION_ENABLED = os.getenv("LLM_CORRECTION_ENABLED", "true").lower() == "true"
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq")
+LLM_API_KEY = os.getenv("GROQ_API_KEY", "")
 LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "30"))
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+CLEANUP_AFTER_SECONDS = int(os.getenv("CLEANUP_AFTER_SECONDS", "300"))  # 5 phút
 
-if not LLM_MODEL:
-    LLM_MODEL = "gpt-4o-mini" if LLM_PROVIDER == "openai" else "llama-3.3-70b-versatile"
+app = FastAPI(title="OCR Service", version="2.1")
 
-if LLM_ENABLED:
-    if LLM_PROVIDER == "openai" and not OPENAI_API_KEY:
-        print("[LLM] WARNING: OpenAI API key not found, disabling correction")
-        LLM_ENABLED = False
-    elif LLM_PROVIDER == "groq" and not GROQ_API_KEY:
-        print("[LLM] WARNING: Groq API key not found, disabling correction")
-        LLM_ENABLED = False
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-print(f"[LLM] {'Enabled' if LLM_ENABLED else 'Disabled'} with provider={LLM_PROVIDER}, model={LLM_MODEL}")
+# ===========================================
+# 🧩 OCR Engines
+# ===========================================
+if not USE_GPU:
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+else:
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # GPU đầu tiên
 
+ocr_paddle = PaddleOCR(use_angle_cls=True, lang="en")
 
-async def correct_text_with_llm(text: str) -> Dict[str, any]:
-    result = {"original_text": text, "corrected_text": None, "corrected": False, "provider": None}
-    if not LLM_ENABLED or not text.strip():
-        return result
+vietocr_config = Cfg.load_config_from_name("vgg_transformer")
+vietocr_config["device"] = "cuda" if USE_GPU else "cpu"
+vietocr = Predictor(vietocr_config)
 
-    system_prompt = """Bạn là một trợ lý AI chuyên sửa lỗi văn bản từ OCR (Optical Character Recognition).
+# ===========================================
+# 🔧 Helper Functions
+# ===========================================
+def detect_language(text: str) -> str:
+    """Nhận diện tiếng Việt"""
+    if re.search(r"[àáạảãâầấậẩẫăằắặẳẵđèéẹẻẽêềếệểễòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹ]", text, re.IGNORECASE):
+        return "vi"
+    return "en"
 
-Nhiệm vụ:
-1. Sửa lỗi chính tả và ký tự OCR.
-2. Giữ nguyên ngữ nghĩa và định dạng cơ bản.
-3. Hỗ trợ cả tiếng Việt và tiếng Anh.
-4. Không thêm hoặc bớt thông tin."""
+def merge_paddle_results(results):
+    return "\n".join([line[1][0] for line in results if len(line) >= 2])
 
-    user_prompt = f"Hãy sửa lỗi chính tả và ngữ pháp cho văn bản sau:\n\n{text}\n\nChỉ trả về văn bản đã sửa:"
+async def llm_correct_text(text: str) -> str:
+    """Gọi API LLM để sửa lỗi OCR"""
+    if not LLM_CORRECTION_ENABLED or not LLM_API_KEY or len(text.strip()) < 10:
+        return text
+
+    prompt = f"""
+    Bạn là chuyên gia sửa lỗi OCR. Hãy phục hồi chính tả, thêm dấu tiếng Việt nếu thiếu,
+    và giữ nguyên các ký tự đặc biệt, số, đơn vị tiền tệ.
+    Văn bản OCR gốc:
+    {text}
+    """
 
     try:
         async with httpx.AsyncClient(timeout=LLM_TIMEOUT) as client:
-            headers = {"Content-Type": "application/json"}
-            json_data = {
-                "model": LLM_MODEL,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                "temperature": 0.3,
-                "max_tokens": 2000,
-            }
-
-            if LLM_PROVIDER == "openai":
-                headers["Authorization"] = f"Bearer {OPENAI_API_KEY}"
-                url = "https://api.openai.com/v1/chat/completions"
-            else:
-                headers["Authorization"] = f"Bearer {GROQ_API_KEY}"
-                url = "https://api.groq.com/openai/v1/chat/completions"
-
-            resp = await client.post(url, headers=headers, json=json_data)
-            if resp.status_code == 200:
-                data = resp.json()
-                corrected = data["choices"][0]["message"]["content"].strip()
-                result.update({
-                    "corrected_text": corrected,
-                    "corrected": True,
-                    "provider": LLM_PROVIDER
-                })
-            else:
-                print(f"[LLM] Error: {resp.status_code} {resp.text}")
-
+            response = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {LLM_API_KEY}"},
+                json={
+                    "model": "llama3-8b-8192",
+                    "messages": [
+                        {"role": "system", "content": "Bạn là chuyên gia xử lý văn bản OCR."},
+                        {"role": "user", "content": prompt},
+                    ],
+                },
+            )
+            data = response.json()
+            return data["choices"][0]["message"]["content"].strip()
     except Exception as e:
-        print(f"[LLM] Correction error: {str(e)}")
+        print(f"❌ LLM error: {e}")
+        return text
 
-    return result
+async def cleanup_file(filepath: str, delay: int = CLEANUP_AFTER_SECONDS):
+    """Tự xóa file sau X giây"""
+    await asyncio.sleep(delay)
+    if os.path.exists(filepath):
+        try:
+            os.remove(filepath)
+            print(f"🧹 Đã xóa file: {filepath}")
+        except Exception as e:
+            print(f"⚠️ Không thể xóa {filepath}: {e}")
 
-
-# ==============================
-# 🧠 OCR API
-# ==============================
-@app.get("/ocr/health", tags=["OCR"])
-async def ocr_health():
+# ===========================================
+# 🚀 API Endpoints
+# ===========================================
+@app.get("/ocr/health")
+async def health():
     return {
         "status": "ok",
-        "device": "GPU" if USE_GPU else "CPU",
-        "llm_enabled": LLM_ENABLED,
-        "llm_provider": LLM_PROVIDER if LLM_ENABLED else None,
-        "llm_model": LLM_MODEL if LLM_ENABLED else None
+        "gpu": USE_GPU,
+        "llm": LLM_CORRECTION_ENABLED,
+        "cleanup_after_seconds": CLEANUP_AFTER_SECONDS
     }
 
-
-@app.post("/ocr/recognize", tags=["OCR"])
-async def ocr_image(file: UploadFile = File(...)):
+@app.post("/ocr")
+async def ocr_upload(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
+    """
+    Upload ảnh -> Nhận dạng text -> Tự xóa sau 5 phút
+    """
     try:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{timestamp}_{file.filename}"
-        filepath = os.path.join(UPLOAD_DIR, filename)
+        # --- Lưu file tạm ---
+        file_id = str(uuid.uuid4())
+        file_ext = os.path.splitext(file.filename)[1]
+        filepath = os.path.join(UPLOAD_DIR, f"{file_id}{file_ext}")
+
         with open(filepath, "wb") as f:
             f.write(await file.read())
 
-        result = ocr.ocr(filepath, cls=True)
-        lines = []
-        for page in result:
-            for line in page:
-                text, conf = line[1]
-                lines.append(text)
-        extracted_text = "\n".join(lines).strip()
+        # --- Đọc ảnh ---
+        image = Image.open(filepath).convert("RGB")
 
-        correction_result = await correct_text_with_llm(extracted_text)
+        # --- PaddleOCR ---
+        paddle_result = ocr_paddle.ocr(image, cls=True)
+        paddle_text = merge_paddle_results(paddle_result[0]) if paddle_result else ""
 
-        output_file = os.path.join(OUTPUT_DIR, f"{timestamp}.txt")
-        with open(output_file, "w", encoding="utf-8") as f:
-            f.write(extracted_text)
+        # --- VietOCR ---
+        lang = detect_language(paddle_text)
+        if lang == "vi" or len(paddle_text.strip()) < 5:
+            viet_text = vietocr.predict(image)
+            raw_text = viet_text
+            engine_used = "vietocr"
+        else:
+            raw_text = paddle_text
+            engine_used = "paddleocr"
 
-        corrected_output_file = None
-        if correction_result["corrected"]:
-            corrected_output_file = os.path.join(OUTPUT_DIR, f"{timestamp}_corrected.txt")
-            with open(corrected_output_file, "w", encoding="utf-8") as f:
-                f.write(correction_result["corrected_text"])
-            asyncio.create_task(delete_file_after(corrected_output_file))
+        # --- Hậu xử lý LLM ---
+        corrected_text = await llm_correct_text(raw_text)
 
-        asyncio.create_task(delete_file_after(filepath))
-        asyncio.create_task(delete_file_after(output_file))
+        # --- Ghi file kết quả ---
+        output_path = os.path.join(OUTPUT_DIR, f"{file_id}.txt")
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(corrected_text)
+
+        # --- Tự động dọn rác ---
+        background_tasks.add_task(cleanup_file, filepath)
+        background_tasks.add_task(cleanup_file, output_path)
 
         return JSONResponse({
-            "status": "success",
-            "filename": filename,
-            "text": extracted_text,
-            "output_file": output_file,
-            "llm_correction": {
-                "enabled": LLM_ENABLED,
-                "corrected": correction_result["corrected"],
-                "corrected_text": correction_result["corrected_text"],
-                "provider": correction_result["provider"],
-                "output_file": corrected_output_file
-            }
+            "id": file_id,
+            "filename": file.filename,
+            "language": lang,
+            "engine_used": engine_used,
+            "raw_text": raw_text,
+            "corrected_text": corrected_text,
+            "file_deleted_after_seconds": CLEANUP_AFTER_SECONDS
         })
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/")
+async def home():
+    """Serve trang chủ với giao diện upload"""
+    return FileResponse("static/index.html", media_type="text/html")
 
-# ==========================
-# 🏠 Giao diện HTML test
-# ==========================
-@app.get("/", response_class=HTMLResponse, tags=["Web"])
-async def root():
-    index_path = os.path.join(STATIC_DIR, "index.html")
-    if os.path.exists(index_path):
-        with open(index_path, "r", encoding="utf-8") as f:
-            return HTMLResponse(f.read())
-    return HTMLResponse("<h2>OCR API (PaddleOCR + LLM) đang chạy</h2>")
+@app.get("/static/{filename}")
+async def serve_static(filename: str):
+    """Serve các file static khác"""
+    return FileResponse(f"static/{filename}")

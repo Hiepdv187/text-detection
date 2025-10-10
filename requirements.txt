@@ -1,20 +1,21 @@
-# --- Web framework ---
 fastapi==0.115.5
 uvicorn[standard]==0.32.0
 python-multipart==0.0.20
 python-dotenv==1.0.1
 
-# --- OCR (PP-OCRv4 multilingual) ---
-paddleocr==3.1.1
-paddlepaddle==3.0.0  # CPU build (GPU: paddlepaddle-gpu==3.0.0.post120)
+# OCR
+paddleocr==2.7.0.3
+paddlepaddle==2.6.0
+vietocr==0.3.12
+torch==2.4.1
+torchvision==0.19.1
+torchaudio==2.4.1
 
 opencv-python-headless==4.10.0.84
 pillow==10.4.0
 numpy>=1.21.0,<2.0.0
 
-# --- Network / async ---
+# HTTP + Utils
 httpx==0.28.1
 requests==2.32.3
-
-# --- Testing ---
 pytest==8.3.3

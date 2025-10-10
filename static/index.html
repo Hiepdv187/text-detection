@@ -306,18 +306,21 @@
             border: 1px solid #c3e6cb;
         }
 
-        .alert-error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
+        .result-info {
+            background: #e9ecef;
+            padding: 8px 12px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            font-size: 0.85em;
+            border-left: 3px solid #667eea;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>📷 OCR Text Recognition + AI</h1>
-            <p>Nhận diện văn bản từ ảnh với tự động sửa lỗi bằng AI - Hỗ trợ Tiếng Việt & Tiếng Anh</p>
+            <h1>🔍 OCR Text Recognition + AI</h1>
+            <p>Nhận diện văn bản từ ảnh với VietOCR + LLM AI - Hỗ trợ Tiếng Việt & Tiếng Anh</p>
         </div>
 
         <div class="card">
@@ -362,7 +365,7 @@
             <div class="result-section" id="resultSection">
                 <div class="tabs" id="tabs" style="display: none;">
                     <button class="tab active" data-tab="original">📝 Văn bản gốc</button>
-                    <button class="tab" data-tab="corrected">✨ Đã sửa lỗi (AI)</button>
+                    <button class="tab" data-tab="corrected">✨ Đã sửa lỗi (VietOCR + AI)</button>
                 </div>
 
                 <div class="tab-content active" id="originalTab">
@@ -376,7 +379,6 @@
                 <div class="tab-content" id="correctedTab">
                     <div class="result-header">
                         <span class="result-title corrected">✨ Văn bản đã sửa lỗi bằng AI:</span>
-                        <span class="badge badge-success" id="llmBadge">AI Corrected</span>
                     </div>
                     <div class="result-box corrected" id="correctedBox"></div>
                     <button class="btn copy-btn" id="copyCorrectedBtn">📋 Copy văn bản đã sửa</button>
@@ -506,32 +508,36 @@
             formData.append('file', file);
 
             try {
-                const response = await fetch('/ocr/recognize', {
+                const response = await fetch('/ocr', {
                     method: 'POST',
                     body: formData
                 });
 
                 const data = await response.json();
 
-                if (response.ok && data.status === 'success') {
+                if (response.ok) {
                     // Hiển thị văn bản gốc
-                    resultBox.textContent = data.text || 'Không nhận diện được văn bản nào';
-                    
-                    // Kiểm tra và hiển thị văn bản đã sửa
-                    if (data.llm_correction && data.llm_correction.corrected && data.llm_correction.corrected_text) {
-                        correctedBox.textContent = data.llm_correction.corrected_text;
-                        tabs.style.display = 'flex';
-                        
-                        // Cập nhật badge với provider
-                        const provider = data.llm_correction.provider || 'AI';
-                        document.getElementById('llmBadge').textContent = `${provider.toUpperCase()} Corrected`;
-                        
-                        showAlert('✅ Nhận diện thành công! AI đã tự động sửa lỗi.', 'success');
-                    } else {
-                        tabs.style.display = 'none';
-                        showAlert('✅ Nhận diện thành công!', 'success');
+                    resultBox.textContent = data.raw_text || 'Không nhận diện được văn bản nào';
+
+                    // Hiển thị văn bản đã sửa
+                    correctedBox.textContent = data.corrected_text || data.raw_text || 'Không nhận diện được văn bản nào';
+
+                    // Hiển thị thông tin bổ sung
+                    const infoDiv = document.createElement('div');
+                    infoDiv.className = 'result-info';
+                    infoDiv.innerHTML = `<strong>Engine:</strong> ${data.engine_used || 'OCR'} | <strong>Ngôn ngữ:</strong> ${data.language || 'EN'}`;
+
+                    const originalTab = document.getElementById('originalTab');
+                    const existingInfo = originalTab.querySelector('.result-info');
+                    if (existingInfo) {
+                        existingInfo.remove();
                     }
-                    
+                    originalTab.insertBefore(infoDiv, originalTab.querySelector('.result-box'));
+
+                    // Hiển thị tabs
+                    tabs.style.display = 'flex';
+
+                    showAlert(`✅ Nhận diện thành công bằng ${data.engine_used} (${data.language})!`, 'success');
                     resultSection.classList.add('active');
                 } else {
                     showAlert('❌ Lỗi: ' + (data.detail || 'Không thể nhận diện'), 'error');
