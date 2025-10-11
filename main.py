@@ -3,6 +3,7 @@ import io
 import re
 import uuid
 import asyncio
+import torch
 import time
 from typing import Optional, Dict
 from fastapi import FastAPI, File, UploadFile, BackgroundTasks, HTTPException
