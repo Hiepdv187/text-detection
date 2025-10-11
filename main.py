@@ -22,7 +22,15 @@ OUTPUT_DIR = "output"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-USE_GPU = os.getenv("USE_GPU_AUTO", "true").lower() == "true"
+use_gpu_auto = os.getenv("USE_GPU_AUTO", "true").lower() == "true"
+force_cpu = os.getenv("FORCE_CPU", "false").lower() == "true"
+force_gpu = os.getenv("FORCE_GPU", "false").lower() == "true"
+if force_cpu:
+    USE_GPU = False
+elif force_gpu:
+    USE_GPU = True
+else:
+    USE_GPU = use_gpu_auto and torch.cuda.is_available()
 LLM_CORRECTION_ENABLED = os.getenv("LLM_CORRECTION_ENABLED", "true").lower() == "true"
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq")
 LLM_API_KEY = os.getenv("GROQ_API_KEY", "")

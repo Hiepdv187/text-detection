@@ -32,6 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxext6 \
     libxrender1 \
     libgomp1 \
+    poppler-utils \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Copy file yêu cầu
@@ -39,7 +40,8 @@ COPY requirements.txt .
 
 # ⚡ Giữ cache pip để lần build sau nhanh hơn
 RUN pip install --upgrade pip wheel setuptools \
-    && pip install --no-cache-dir -r requirements.txt
+    && pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-deps --no-cache-dir paddleocr==2.8.1
 
 # ======================================
 # 🚀 Stage 2: Runtime
