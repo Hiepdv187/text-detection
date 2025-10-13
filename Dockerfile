@@ -33,6 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrender1 \
     libgomp1 \
     poppler-utils \
+    fonts-dejavu-core \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Copy file yêu cầu
@@ -59,13 +60,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Lib runtime cơ bản
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libglib2.0-0 libsm6 libxrender1 libxext6 libgl1 libgomp1 curl \
+    libglib2.0-0 libsm6 libxrender1 libxext6 libgl1 libgomp1 fonts-dejavu-core  curl \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Copy từ builder sang
 COPY --from=builder /usr/local /usr/local
 COPY main.py ./
-RUN mkdir -p uploads output
+RUN mkdir -p uploads output static
+
+# Copy static files
+COPY static/ ./static/
 
 EXPOSE 5678
 

@@ -5,6 +5,7 @@ import uuid
 import asyncio
 import torch
 import time
+import traceback
 from typing import Optional, Dict
 from fastapi import FastAPI, File, UploadFile, BackgroundTasks, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
@@ -56,7 +57,7 @@ if not USE_GPU:
 else:
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # GPU đầu tiên
 
-ocr_paddle = PaddleOCR(use_angle_cls=True, lang="en")
+ocr_paddle = PaddleOCR(use_angle_cls=True, lang="en", show_log=True)
 
 vietocr_config = Cfg.load_config_from_name("vgg_transformer")
 vietocr_config["device"] = "cuda" if USE_GPU else "cpu"
@@ -132,43 +133,90 @@ async def ocr_upload(file: UploadFile = File(...), background_tasks: BackgroundT
     """
     Upload ảnh -> Nhận dạng text -> Tự xóa sau 5 phút
     """
+    file_id = str(uuid.uuid4())
+    filepath = ""
+    output_path = ""
+    
     try:
+        print(f"[DEBUG] Starting OCR processing for file: {file.filename}")
+        
         # --- Lưu file tạm ---
-        file_id = str(uuid.uuid4())
         file_ext = os.path.splitext(file.filename)[1]
         filepath = os.path.join(UPLOAD_DIR, f"{file_id}{file_ext}")
-
+        
+        print(f"[DEBUG] Saving file to: {filepath}")
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        
+        file_content = await file.read()
         with open(filepath, "wb") as f:
-            f.write(await file.read())
+            f.write(file_content)
+        print(f"[DEBUG] File saved successfully: {os.path.exists(filepath)}")
 
         # --- Đọc ảnh ---
-        image = Image.open(filepath).convert("RGB")
+        print("[DEBUG] Opening image...")
+        try:
+            image = Image.open(io.BytesIO(file_content)).convert("RGB")
+            print("[DEBUG] Image opened successfully")
+        except Exception as img_err:
+            print(f"[ERROR] Failed to open image: {str(img_err)}")
+            raise HTTPException(status_code=400, detail=f"Invalid image file: {str(img_err)}")
 
         # --- PaddleOCR ---
-        paddle_result = ocr_paddle.ocr(image, cls=True)
-        paddle_text = merge_paddle_results(paddle_result[0]) if paddle_result else ""
+        print("[DEBUG] Running PaddleOCR...")
+        try:
+            paddle_result = ocr_paddle.ocr(image, cls=True)
+            paddle_text = merge_paddle_results(paddle_result[0]) if paddle_result else ""
+            print(f"[DEBUG] PaddleOCR completed. Detected text length: {len(paddle_text)}")
+        except Exception as ocr_err:
+            print(f"[ERROR] PaddleOCR failed: {str(ocr_err)}")
+            raise HTTPException(status_code=500, detail=f"OCR processing error: {str(ocr_err)}")
 
         # --- VietOCR ---
-        lang = detect_language(paddle_text)
-        if lang == "vi" or len(paddle_text.strip()) < 5:
-            viet_text = vietocr.predict(image)
-            raw_text = viet_text
-            engine_used = "vietocr"
-        else:
-            raw_text = paddle_text
-            engine_used = "paddleocr"
+        print("[DEBUG] Running language detection...")
+        try:
+            lang = detect_language(paddle_text)
+            print(f"[DEBUG] Detected language: {lang}")
+            
+            if lang == "vi" or len(paddle_text.strip()) < 5:
+                print("[DEBUG] Using VietOCR for Vietnamese text...")
+                viet_text = vietocr.predict(image)
+                raw_text = viet_text
+                engine_used = "vietocr"
+                print(f"[DEBUG] VietOCR completed. Text length: {len(raw_text)}")
+            else:
+                raw_text = paddle_text
+                engine_used = "paddleocr"
+                print("[DEBUG] Using PaddleOCR results directly")
+        except Exception as lang_err:
+            print(f"[ERROR] Language detection/processing failed: {str(lang_err)}")
+            raise HTTPException(status_code=500, detail=f"Language processing error: {str(lang_err)}")
 
         # --- Hậu xử lý LLM ---
-        corrected_text = await llm_correct_text(raw_text)
+        print("[DEBUG] Running LLM correction...")
+        try:
+            corrected_text = await llm_correct_text(raw_text)
+            print("[DEBUG] LLM correction completed")
+        except Exception as llm_err:
+            print(f"[WARNING] LLM correction failed, using raw text. Error: {str(llm_err)}")
+            corrected_text = raw_text
 
         # --- Ghi file kết quả ---
-        output_path = os.path.join(OUTPUT_DIR, f"{file_id}.txt")
-        with open(output_path, "w", encoding="utf-8") as f:
-            f.write(corrected_text)
+        try:
+            output_path = os.path.join(OUTPUT_DIR, f"{file_id}.txt")
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            with open(output_path, "w", encoding="utf-8") as f:
+                f.write(corrected_text)
+            print(f"[DEBUG] Results saved to: {output_path}")
+        except Exception as file_err:
+            print(f"[ERROR] Failed to save results: {str(file_err)}")
+            # Continue even if file save fails
 
         # --- Tự động dọn rác ---
-        background_tasks.add_task(cleanup_file, filepath)
-        background_tasks.add_task(cleanup_file, output_path)
+        if background_tasks:
+            if os.path.exists(filepath):
+                background_tasks.add_task(cleanup_file, filepath)
+            if output_path and os.path.exists(output_path):
+                background_tasks.add_task(cleanup_file, output_path)
 
         return JSONResponse({
             "id": file_id,
@@ -180,8 +228,14 @@ async def ocr_upload(file: UploadFile = File(...), background_tasks: BackgroundT
             "file_deleted_after_seconds": CLEANUP_AFTER_SECONDS
         })
 
+    except HTTPException as http_err:
+        print(f"[HTTP ERROR] {http_err.status_code}: {http_err.detail}")
+        raise http_err
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        error_msg = f"Unexpected error: {str(e)}"
+        print(f"[ERROR] {error_msg}")
+        print(f"[ERROR] Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=error_msg)
 
 @app.get("/")
 async def home():
