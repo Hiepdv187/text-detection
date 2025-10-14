@@ -1,30 +1,40 @@
 # ======================================
-# 🐍 Stage 1: Builder
+# 🐍 Multi-platform OCR Service
 # ======================================
-FROM --platform=$BUILDPLATFORM python:3.11-slim AS builder
+FROM python:3.11-slim
+
+# Build arguments for multi-platform
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
 
 # Env
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    DEBIAN_FRONTEND=noninteractive
+    DEBIAN_FRONTEND=noninteractive \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
 
-# Các lib tối thiểu để build paddle/torch mà không bị lỗi
+# Runtime environment variables
+ENV USE_GPU_AUTO=true \
+    LLM_CORRECTION_ENABLED=true \
+    LLM_PROVIDER=groq \
+    CLEANUP_AFTER_SECONDS=300 \
+    LLM_TIMEOUT=30
+
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     git \
     wget \
     curl \
-    swig \
     python3-dev \
     libfreetype6-dev \
     libjpeg-dev \
     libopenjp2-7-dev \
     libtiff-dev \
     libharfbuzz-dev \
-    libjbig2dec0-dev \
-    libleptonica-dev \
     libz-dev \
     libgl1 \
     libglib2.0-0 \
@@ -32,44 +42,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxext6 \
     libxrender1 \
     libgomp1 \
-    poppler-utils \
     fonts-dejavu-core \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Copy file yêu cầu
+# Copy requirements and install Python packages
 COPY requirements.txt .
+RUN pip install --upgrade pip wheel setuptools && \
+    pip install --no-cache-dir -r requirements.txt
 
-# ⚡ Giữ cache pip để lần build sau nhanh hơn
-RUN pip install --upgrade pip wheel setuptools \
-    && pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-deps --no-cache-dir paddleocr==2.8.1
-
-# ======================================
-# 🚀 Stage 2: Runtime
-# ======================================
-FROM --platform=$TARGETPLATFORM python:3.11-slim AS runtime
-
-WORKDIR /app
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    USE_GPU_AUTO=true \
-    LLM_CORRECTION_ENABLED=true \
-    LLM_PROVIDER=groq \
-    CLEANUP_AFTER_SECONDS=300 \
-    LLM_TIMEOUT=30
-
-# Lib runtime cơ bản
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libglib2.0-0 libsm6 libxrender1 libxext6 libgl1 libgomp1 fonts-dejavu-core  curl \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Copy từ builder sang
-COPY --from=builder /usr/local /usr/local
+# Copy application files
 COPY main.py ./
-RUN mkdir -p uploads output static
-
-# Copy static files
 COPY static/ ./static/
+RUN mkdir -p uploads output
 
 EXPOSE 5678
 

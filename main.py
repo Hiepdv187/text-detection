@@ -5,6 +5,7 @@ import asyncio
 import torch
 import time
 import traceback
+import io
 from typing import Optional, Dict
 from fastapi import FastAPI, File, UploadFile, BackgroundTasks, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
@@ -169,6 +170,16 @@ async def cleanup_old_files():
                     print(f"⚠️ Không thể xóa {filepath}: {e}")
 
     return cleaned_count
+
+async def cleanup_file(filepath: str):
+    """Xóa file sau một khoảng thời gian"""
+    await asyncio.sleep(CLEANUP_AFTER_SECONDS)
+    try:
+        if os.path.exists(filepath):
+            os.remove(filepath)
+            print(f"🧹 Đã xóa file: {filepath}")
+    except Exception as e:
+        print(f"⚠️ Không thể xóa {filepath}: {e}")
 
 # ===========================================
 # 🚀 API Endpoints
@@ -348,6 +359,16 @@ async def ocr_upload(file: UploadFile = File(...), background_tasks: BackgroundT
         print(f"[ERROR] {error_msg}")
         print(f"[ERROR] Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=error_msg)
+
+@app.get("/ocr/health")
+async def health_check():
+    """Health check endpoint for Docker"""
+    return JSONResponse({
+        "status": "healthy",
+        "ocr_engines_initialized": _ocr_engines_initialized,
+        "gpu_available": torch.cuda.is_available(),
+        "using_gpu": USE_GPU
+    })
 
 @app.get("/")
 async def home():
