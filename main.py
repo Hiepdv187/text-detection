@@ -6,6 +6,7 @@ import torch
 import time
 import traceback
 import io
+import numpy as np
 from typing import Optional, Dict
 from fastapi import FastAPI, File, UploadFile, BackgroundTasks, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
@@ -99,13 +100,30 @@ def ensure_ocr_engines():
 # 🔧 Helper Functions
 # ===========================================
 def detect_language(text: str) -> str:
-    """Nhận diện tiếng Việt"""
-    if re.search(r"[àáạảãâầấậẩẫăằắặẳẵđèéẹẻẽêềếệểễòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹ]", text, re.IGNORECASE):
+    """Nhận diện tiếng Việt cải tiến"""
+    text_lower = text.lower()
+    
+    # Kiểm tra ký tự đặc biệt tiếng Việt
+    viet_chars = r"[àáạảãâầấậẩẫăằắặẳẵđèéẹẻẽêềếệểễòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹ]"
+    if re.search(viet_chars, text, re.IGNORECASE):
         return "vi"
+    
+    # Từ vựng tiếng Việt phổ biến (không dấu)
+    viet_words = ["la", "va", "vao", "ra", "di", "den", "tu", "voi", "cho", "nguoi", "nam", "nuoc", "thi", "nay", "hoac", "nhung", "nhieu", "mot", "hai", "ba", "bon", "nam", "sau", "bay", "tam", "chin", "muoi"]
+    viet_word_count = sum(1 for word in viet_words if word in text_lower)
+    
+    # Kiểm tra tỷ lệ ký tự tiếng Việt (dựa trên mẫu)
+    total_chars = len(text)
+    if total_chars > 10:  # Chỉ áp dụng cho văn bản dài
+        viet_char_count = sum(1 for c in text if c.lower() in "àáạảãâầấậẩẫăằắặẳẵđèéẹẻẽêềếệểễòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹ")
+        viet_ratio = viet_char_count / total_chars
+        if viet_ratio > 0.1 or viet_word_count > 2:  # Ngưỡng phát hiện
+            return "vi"
+    
     return "en"
 
 def merge_paddle_results(results):
-    return "\n".join([line[1][0] for line in results if len(line) >= 2])
+    return "\n".join([line[1][1] for line in results if len(line) >= 2 and len(line[1]) >= 2])
 
 async def llm_correct_text(text: str) -> str:
     """Gọi API LLM để sửa lỗi OCR"""
@@ -270,7 +288,8 @@ async def ocr_upload(file: UploadFile = File(...), background_tasks: BackgroundT
         print("[DEBUG] Opening image...")
         try:
             image = Image.open(io.BytesIO(file_content)).convert("RGB")
-            print("[DEBUG] Image opened successfully")
+            image = np.array(image)  # Chuyển đổi sang numpy array cho PaddleOCR
+            print("[DEBUG] Image opened and converted successfully")
         except Exception as img_err:
             print(f"[ERROR] Failed to open image: {str(img_err)}")
             raise HTTPException(status_code=400, detail=f"Invalid image file: {str(img_err)}")
@@ -284,8 +303,14 @@ async def ocr_upload(file: UploadFile = File(...), background_tasks: BackgroundT
             if paddle_result is None:
                 print("[ERROR] PaddleOCR returned None")
                 raise Exception("PaddleOCR returned None result")
+
+            print(f"[DEBUG] PaddleOCR raw result: {paddle_result}")
+            if paddle_result[0]:
+                print(f"[DEBUG] First few results: {paddle_result[0][:3]}")
+
             paddle_text = merge_paddle_results(paddle_result[0]) if paddle_result[0] else ""
             print(f"[DEBUG] PaddleOCR completed. Detected text length: {len(paddle_text)}")
+            print(f"[DEBUG] PaddleOCR detected text: '{paddle_text}'")
         except Exception as ocr_err:
             print(f"[ERROR] PaddleOCR failed: {str(ocr_err)}")
             print(f"[ERROR] PaddleOCR error type: {type(ocr_err)}")
@@ -297,12 +322,15 @@ async def ocr_upload(file: UploadFile = File(...), background_tasks: BackgroundT
         try:
             lang = detect_language(paddle_text)
             print(f"[DEBUG] Detected language: {lang}")
+            print(f"[DEBUG] Sample text from PaddleOCR: '{paddle_text[:100]}...'")  # In mẫu văn bản để kiểm tra
             
             if lang == "vi" or len(paddle_text.strip()) < 5:
                 print("[DEBUG] Using VietOCR for Vietnamese text...")
                 if vietocr is None:
                     raise Exception("VietOCR not initialized")
-                viet_text = vietocr.predict(image)
+                # Convert numpy array back to PIL Image for VietOCR
+                pil_image = Image.fromarray(image)
+                viet_text = vietocr.predict(pil_image)
                 raw_text = viet_text
                 engine_used = "vietocr"
                 print(f"[DEBUG] VietOCR completed. Text length: {len(raw_text)}")
